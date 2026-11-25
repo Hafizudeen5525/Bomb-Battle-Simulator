@@ -1,0 +1,6 @@
+{
+  "name": "Bomb Battle Simulator",
+  "description": "Authentic tactical training simulator for Bomb Battle featuring Power Grid, Melody Hack, Decrypt, and Bomb Defuse with randomized levels, countdown timers, and a persistent scoreboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
