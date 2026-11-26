@@ -293,3 +293,49 @@ export function validatePowerGridBoard(
     isSolved: allConnected,
   };
 }
+
+/**
+ * Computes intermediate orthogonal grid steps between `from` and `to` so fast
+ * finger swipes or slight diagonal drags smoothly trace around corners instead
+ * of dropping cells.
+ */
+export function interpolateDragSteps(
+  from: GridCoord,
+  to: GridCoord,
+  canEnter: (coord: GridCoord) => boolean
+): GridCoord[] {
+  const dr = to.r - from.r;
+  const dc = to.c - from.c;
+  const dist = Math.abs(dr) + Math.abs(dc);
+
+  if (dist === 0) return [];
+  if (dist === 1) {
+    return canEnter(to) ? [to] : [];
+  }
+
+  if (dist === 2) {
+    if (dr === 0 || dc === 0) {
+      const mid: GridCoord = {
+        r: from.r + Math.sign(dr),
+        c: from.c + Math.sign(dc),
+      };
+      if (canEnter(mid) && canEnter(to)) {
+        return [mid, to];
+      }
+      return [];
+    }
+
+    // Diagonal 1x1 move: try either orthogonal corner
+    const cornerA: GridCoord = { r: from.r, c: to.c };
+    const cornerB: GridCoord = { r: to.r, c: from.c };
+    if (canEnter(cornerA) && canEnter(to)) {
+      return [cornerA, to];
+    }
+    if (canEnter(cornerB) && canEnter(to)) {
+      return [cornerB, to];
+    }
+  }
+
+  return [];
+}
+

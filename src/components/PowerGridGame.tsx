@@ -3,6 +3,7 @@ import { ArrowRight, Eraser, RotateCcw } from 'lucide-react';
 import {
   CIRCUIT_COLORS,
   generatePowerGridPuzzle,
+  interpolateDragSteps,
   validatePowerGridBoard,
   type GridCoord,
   type PathMap,
@@ -35,9 +36,17 @@ export const PowerGridGame: React.FC<PowerGridGameProps> = ({
   );
   const [paths, setPaths] = useState<PathMap>({});
   const [activeColor, setActiveColor] = useState<number | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
   const [solvedBanner, setSolvedBanner] = useState(false);
+
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const pathsRef = useRef<PathMap>(paths);
+  const activeColorRef = useRef<number | null>(activeColor);
+  const isDraggingRef = useRef(false);
+  const lastCellRef = useRef<GridCoord | null>(null);
   const solvedTimerRef = useRef<number | null>(null);
+
+  pathsRef.current = paths;
+  activeColorRef.current = activeColor;
 
   const validation = useMemo(
     () => validatePowerGridBoard(puzzle, paths),
@@ -54,13 +63,17 @@ export const PowerGridGame: React.FC<PowerGridGameProps> = ({
     return map;
   }, [puzzle]);
 
-  // Clear pointer drag on global pointerup
   useEffect(() => {
-    const handleUp = () => {
-      setIsDragging(false);
+    const stopDrag = () => {
+      isDraggingRef.current = false;
+      lastCellRef.current = null;
     };
-    window.addEventListener('pointerup', handleUp);
-    return () => window.removeEventListener('pointerup', handleUp);
+    window.addEventListener('pointerup', stopDrag);
+    window.addEventListener('pointercancel', stopDrag);
+    return () => {
+      window.removeEventListener('pointerup', stopDrag);
+      window.removeEventListener('pointercancel', stopDrag);
+    };
   }, []);
 
   useEffect(() => {
@@ -73,7 +86,8 @@ export const PowerGridGame: React.FC<PowerGridGameProps> = ({
   useEffect(() => {
     if (!validation.isSolved || solvedBanner) return;
     setSolvedBanner(true);
-    setIsDragging(false);
+    isDraggingRef.current = false;
+    lastCellRef.current = null;
     soundEngine.playLevelClear();
 
     const mult = DIFFICULTY_CONFIG[difficulty].scoreMultiplier;
@@ -87,153 +101,244 @@ export const PowerGridGame: React.FC<PowerGridGameProps> = ({
       setLevel(nextLvl);
       setPuzzle(generatePowerGridPuzzle(nextLvl, difficulty));
       setPaths({});
+      pathsRef.current = {};
       setActiveColor(null);
+      activeColorRef.current = null;
       setSolvedBanner(false);
     }, 650);
-  }, [validation.isSolved, validation.fullCoverage, solvedBanner, difficulty, level, onScoreAdd, onLevelCleared]);
+  }, [
+    validation.isSolved,
+    validation.fullCoverage,
+    solvedBanner,
+    difficulty,
+    level,
+    onScoreAdd,
+    onLevelCleared,
+  ]);
 
-  const extendOrStartAt = useCallback(
-    (coord: GridCoord, isStart: boolean) => {
-      if (paused || solvedBanner) return;
-      const key = `${coord.r},${coord.c}`;
-      const endpointColor = endpointMap.get(key);
+  const commitPaths = useCallback((nextPaths: PathMap) => {
+    pathsRef.current = nextPaths;
+    setPaths(nextPaths);
+  }, []);
 
-      if (isStart) {
-        if (endpointColor !== undefined) {
-          setActiveColor(endpointColor);
-          setIsDragging(true);
-          setPaths((prev) => ({
-            ...prev,
-            [endpointColor]: [coord],
-          }));
-          soundEngine.playClick(1.0);
-          return;
-        }
+  const commitActiveColor = useCallback((colorIdx: number | null) => {
+    activeColorRef.current = colorIdx;
+    setActiveColor(colorIdx);
+  }, []);
 
-        // Check if clicking on an existing path cell to resume from there
-        for (const [colorKey, path] of Object.entries(paths)) {
-          const idx = path.findIndex((p) => p.r === coord.r && p.c === coord.c);
-          if (idx !== -1) {
-            const cIdx = Number(colorKey);
-            setActiveColor(cIdx);
-            setIsDragging(true);
-            setPaths((prev) => ({
-              ...prev,
-              [cIdx]: path.slice(0, idx + 1),
-            }));
-            soundEngine.playClick(0.95);
-            return;
-          }
-        }
+  const stepPathTo = useCallback(
+    (coord: GridCoord) => {
+      const color = activeColorRef.current;
+      if (color === null) return;
+
+      const endpointColor = endpointMap.get(`${coord.r},${coord.c}`);
+      if (endpointColor !== undefined && endpointColor !== color) return;
+
+      const prev = pathsRef.current;
+      const current = prev[color] ?? [];
+      if (current.length === 0) return;
+
+      const last = current[current.length - 1];
+      if (last.r === coord.r && last.c === coord.c) return;
+
+      // Backtracking along own path
+      const selfIdx = current.findIndex((p) => p.r === coord.r && p.c === coord.c);
+      if (selfIdx !== -1) {
+        const sliced = current.slice(0, selfIdx + 1);
+        commitPaths({ ...prev, [color]: sliced });
+        soundEngine.playClick(0.95);
         return;
       }
 
-      // Extending active color path
-      if (activeColor === null) return;
+      // Prevent extending past already-completed opposite endpoint
+      const pair = puzzle.pairs.find((p) => p.colorIndex === color);
+      const alreadyLinked =
+        pair &&
+        current.length >= 2 &&
+        ((current[0].r === pair.a.r &&
+          current[0].c === pair.a.c &&
+          last.r === pair.b.r &&
+          last.c === pair.b.c) ||
+          (current[0].r === pair.b.r &&
+            current[0].c === pair.b.c &&
+            last.r === pair.a.r &&
+            last.c === pair.a.c));
+      if (alreadyLinked) return;
 
-      // Cannot enter another color's endpoint
-      if (endpointColor !== undefined && endpointColor !== activeColor) return;
+      const steps = interpolateDragSteps(last, coord, (c) => {
+        const ep = endpointMap.get(`${c.r},${c.c}`);
+        return ep === undefined || ep === color;
+      });
+      if (steps.length === 0) return;
 
-      setPaths((prev) => {
-        const current = prev[activeColor] ?? [];
-        if (current.length === 0) return prev;
-        const last = current[current.length - 1];
+      let nextPaths: PathMap = { ...prev };
+      let updated = [...current];
 
-        // If backtracking onto existing cell of own path, slice back
-        const selfIdx = current.findIndex((p) => p.r === coord.r && p.c === coord.c);
-        if (selfIdx !== -1) {
-          if (selfIdx === current.length - 1) return prev;
-          return {
-            ...prev,
-            [activeColor]: current.slice(0, selfIdx + 1),
-          };
+      for (const step of steps) {
+        // Stop if step loops back into own path
+        const hitSelf = updated.findIndex((p) => p.r === step.r && p.c === step.c);
+        if (hitSelf !== -1) {
+          updated = updated.slice(0, hitSelf + 1);
+          continue;
         }
 
-        // Must be orthogonally adjacent to last cell
-        const dist = Math.abs(last.r - coord.r) + Math.abs(last.c - coord.c);
-        if (dist !== 1) return prev;
-
-        // If last cell was already the opposite endpoint of this color (completed pair), do not extend past it
-        const pair = puzzle.pairs.find((p) => p.colorIndex === activeColor);
-        if (
-          pair &&
-          current.length >= 2 &&
-          ((current[0].r === pair.a.r &&
-            current[0].c === pair.a.c &&
-            last.r === pair.b.r &&
-            last.c === pair.b.c) ||
-            (current[0].r === pair.b.r &&
-              current[0].c === pair.b.c &&
-              last.r === pair.a.r &&
-              last.c === pair.a.c))
-        ) {
-          return prev;
-        }
-
-        // Trim any other color path that occupies this cell
-        const nextPaths: PathMap = { ...prev };
+        // Trim any conflicting other color path at this cell
         for (const [otherKey, otherPath] of Object.entries(nextPaths)) {
           const oColor = Number(otherKey);
-          if (oColor === activeColor) continue;
-          const hitIdx = otherPath.findIndex((p) => p.r === coord.r && p.c === coord.c);
+          if (oColor === color) continue;
+          const hitIdx = otherPath.findIndex((p) => p.r === step.r && p.c === step.c);
           if (hitIdx !== -1) {
             nextPaths[oColor] = otherPath.slice(0, hitIdx);
           }
         }
 
-        const updated = [...current, coord];
-        nextPaths[activeColor] = updated;
+        updated.push(step);
 
-        if (endpointColor === activeColor && updated.length >= 2) {
+        const stepEp = endpointMap.get(`${step.r},${step.c}`);
+        if (stepEp === color && updated.length >= 2) {
           soundEngine.playConnect();
+          break;
         } else {
           soundEngine.playClick(1.1);
         }
+      }
 
-        return nextPaths;
-      });
+      nextPaths[color] = updated;
+      commitPaths(nextPaths);
     },
-    [paused, solvedBanner, endpointMap, paths, activeColor, puzzle.pairs]
+    [endpointMap, puzzle.pairs, commitPaths]
   );
 
-  const handleCellPointerDown = (r: number, c: number) => {
-    const coord = { r, c };
-    const endpointColor = endpointMap.get(`${r},${c}`);
+  const startAtCoord = useCallback(
+    (coord: GridCoord) => {
+      if (paused || solvedBanner) return;
+      const endpointColor = endpointMap.get(`${coord.r},${coord.c}`);
 
-    // If an active color is already selected and user clicks an adjacent cell step-by-step
-    if (
-      activeColor !== null &&
-      (endpointColor === undefined || endpointColor === activeColor)
-    ) {
-      const curr = paths[activeColor] ?? [];
-      if (curr.length > 0) {
-        const last = curr[curr.length - 1];
-        const dist = Math.abs(last.r - r) + Math.abs(last.c - c);
-        if (dist === 1) {
-          setIsDragging(true);
-          extendOrStartAt(coord, false);
+      // Step-by-step tap fallback: if user taps a cell adjacent to currently selected path
+      const currentColor = activeColorRef.current;
+      if (
+        currentColor !== null &&
+        (endpointColor === undefined || endpointColor === currentColor)
+      ) {
+        const currPath = pathsRef.current[currentColor] ?? [];
+        if (currPath.length > 0) {
+          const last = currPath[currPath.length - 1];
+          const dist = Math.abs(last.r - coord.r) + Math.abs(last.c - coord.c);
+          if (dist === 1) {
+            isDraggingRef.current = true;
+            lastCellRef.current = coord;
+            stepPathTo(coord);
+            return;
+          }
+        }
+      }
+
+      // Start fresh from endpoint
+      if (endpointColor !== undefined) {
+        commitActiveColor(endpointColor);
+        isDraggingRef.current = true;
+        lastCellRef.current = coord;
+        commitPaths({
+          ...pathsRef.current,
+          [endpointColor]: [coord],
+        });
+        soundEngine.playClick(1.0);
+        return;
+      }
+
+      // Resume from existing path body
+      for (const [colorKey, path] of Object.entries(pathsRef.current)) {
+        const idx = path.findIndex((p) => p.r === coord.r && p.c === coord.c);
+        if (idx !== -1) {
+          const cIdx = Number(colorKey);
+          commitActiveColor(cIdx);
+          isDraggingRef.current = true;
+          lastCellRef.current = coord;
+          commitPaths({
+            ...pathsRef.current,
+            [cIdx]: path.slice(0, idx + 1),
+          });
+          soundEngine.playClick(0.95);
           return;
         }
       }
+    },
+    [paused, solvedBanner, endpointMap, commitActiveColor, commitPaths, stepPathTo]
+  );
+
+  const clientPointToCoord = useCallback(
+    (clientX: number, clientY: number): GridCoord | null => {
+      const el = gridRef.current;
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      // Account for 8px (p-2) inner padding inside the grid container
+      const pad = 8;
+      const innerWidth = rect.width - pad * 2;
+      const innerHeight = rect.height - pad * 2;
+      if (innerWidth <= 0 || innerHeight <= 0) return null;
+
+      const x = clientX - rect.left - pad;
+      const y = clientY - rect.top - pad;
+      if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return null;
+
+      const c = Math.min(puzzle.size - 1, Math.max(0, Math.floor((x / innerWidth) * puzzle.size)));
+      const r = Math.min(puzzle.size - 1, Math.max(0, Math.floor((y / innerHeight) * puzzle.size)));
+      return { r, c };
+    },
+    [puzzle.size]
+  );
+
+  const handleGridPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (paused || solvedBanner) return;
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+
+    const coord = clientPointToCoord(e.clientX, e.clientY);
+    if (!coord) return;
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore if pointer capture isn't supported in synthetic test environments
     }
 
-    extendOrStartAt(coord, true);
+    startAtCoord(coord);
+  };
+
+  const handleGridPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingRef.current || paused || solvedBanner) return;
+    const coord = clientPointToCoord(e.clientX, e.clientY);
+    if (!coord) return;
+
+    const last = lastCellRef.current;
+    if (last && last.r === coord.r && last.c === coord.c) return;
+    lastCellRef.current = coord;
+    stepPathTo(coord);
+  };
+
+  const handleGridPointerEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    isDraggingRef.current = false;
+    lastCellRef.current = null;
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // Ignore
+    }
   };
 
   const handleClearBoard = () => {
     if (paused || solvedBanner) return;
-    setPaths({});
-    setActiveColor(null);
+    commitPaths({});
+    commitActiveColor(null);
     soundEngine.playClick(0.8);
   };
 
   const handleResetActiveLine = () => {
     if (paused || solvedBanner || activeColor === null) return;
-    setPaths((prev) => {
-      const next = { ...prev };
-      delete next[activeColor];
-      return next;
-    });
+    const next = { ...pathsRef.current };
+    delete next[activeColor];
+    commitPaths(next);
     soundEngine.playClick(0.8);
   };
 
@@ -241,15 +346,22 @@ export const PowerGridGame: React.FC<PowerGridGameProps> = ({
   const fillPct = Math.round((validation.filledCells / validation.totalCells) * 100);
 
   return (
-    <div className="w-full max-w-5xl mx-auto px-4 py-6 flex flex-col lg:flex-row items-center lg:items-start justify-center gap-8">
+    <div className="w-full max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex flex-col lg:flex-row items-center lg:items-start justify-center gap-6 lg:gap-8">
       {/* Main Circuit Grid */}
-      <div className="relative bg-[#111621] border border-slate-800 rounded-xl p-4 sm:p-5 select-none touch-none">
+      <div className="relative bg-[#111621] border border-slate-800 rounded-xl p-3 sm:p-5 select-none touch-none">
         <div
-          className="relative grid gap-1 bg-[#0B0E14] p-2 rounded-lg border border-slate-800"
+          ref={gridRef}
+          data-testid="power-grid-board"
+          onPointerDown={handleGridPointerDown}
+          onPointerMove={handleGridPointerMove}
+          onPointerUp={handleGridPointerEnd}
+          onPointerCancel={handleGridPointerEnd}
+          className="relative grid gap-1 bg-[#0B0E14] p-2 rounded-lg border border-slate-800 touch-none select-none cursor-crosshair"
           style={{
             gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
-            width: 'min(86vw, 480px)',
-            height: 'min(86vw, 480px)',
+            gridTemplateRows: `repeat(${size}, minmax(0, 1fr))`,
+            width: 'min(90vw, 480px)',
+            height: 'min(90vw, 480px)',
           }}
         >
           {/* SVG Pipe Overlay */}
@@ -270,10 +382,10 @@ export const PowerGridGame: React.FC<PowerGridGameProps> = ({
                   points={points}
                   fill="none"
                   stroke={def.hex}
-                  strokeWidth={28}
+                  strokeWidth={30}
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  opacity={0.88}
+                  opacity={0.9}
                 />
               );
             })}
@@ -305,29 +417,33 @@ export const PowerGridGame: React.FC<PowerGridGameProps> = ({
                 <button
                   key={`${r}-${c}`}
                   type="button"
-                  onPointerDown={() => handleCellPointerDown(r, c)}
-                  onPointerEnter={() => {
-                    if (isDragging) extendOrStartAt({ r, c }, false);
+                  onClick={() => {
+                    // Keyboard activation (Enter/Space) support without duplicating pointer down
+                    if (!isDraggingRef.current && lastCellRef.current === null) {
+                      startAtCoord({ r, c });
+                      lastCellRef.current = null;
+                      isDraggingRef.current = false;
+                    }
                   }}
                   aria-label={
                     colorDef
                       ? `Circuit node ${colorDef.label} (${colorDef.symbol}) at row ${r + 1} column ${c + 1}`
                       : `Grid cell row ${r + 1} column ${c + 1}`
                   }
-                  className={`relative z-20 flex items-center justify-center rounded-md border transition-colors cursor-pointer ${
+                  className={`relative z-20 flex items-center justify-center rounded-md border transition-colors touch-none ${
                     isSelectedEndpoint
-                      ? 'border-white/70 bg-slate-800/70'
+                      ? 'border-white/80 bg-slate-800/70'
                       : 'border-slate-800/80 bg-[#141B29]/75 hover:bg-slate-800/70'
                   }`}
                   style={
                     pathColorDef && !colorDef
-                      ? { backgroundColor: `${pathColorDef.hex}20` }
+                      ? { backgroundColor: `${pathColorDef.hex}22` }
                       : undefined
                   }
                 >
                   {colorDef && (
                     <span
-                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center font-mono-tabular text-xs font-extrabold text-slate-950 shadow-sm ring-2 ring-slate-950/60"
+                      className="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center font-mono-tabular text-xs font-extrabold text-slate-950 shadow-sm ring-2 ring-slate-950/60 pointer-events-none"
                       style={{ backgroundColor: colorDef.hex }}
                     >
                       {colorDef.symbol}
@@ -348,20 +464,23 @@ export const PowerGridGame: React.FC<PowerGridGameProps> = ({
       </div>
 
       {/* Right Side Tactical Panel */}
-      <aside className="w-full max-w-md lg:w-80 bg-[#111621] border border-slate-800 rounded-xl p-5 space-y-5">
+      <aside className="w-full max-w-md lg:w-80 bg-[#111621] border border-slate-800 rounded-xl p-4 sm:p-5 space-y-4 sm:space-y-5">
         <div>
           <h3 className="font-display text-xl font-bold uppercase tracking-wide text-white">
             Power Grid Status
           </h3>
           <p className="text-xs text-slate-400 mt-1">
-            Drag from any colored terminal node to its matching letter without crossing other lines.
+            Touch and drag (or click and drag) from any node to its matching letter without crossing lines.
           </p>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-[#0B0E14] border border-slate-800 rounded-lg p-3">
             <div className="text-xs text-slate-400">Pairs Linked</div>
-            <div className="font-mono-tabular text-2xl font-bold text-cyan-400 mt-0.5">
+            <div
+              data-testid="power-grid-pairs"
+              className="font-mono-tabular text-2xl font-bold text-cyan-400 mt-0.5"
+            >
               {validation.connectedCount} / {validation.totalPairs}
             </div>
           </div>
@@ -394,7 +513,7 @@ export const PowerGridGame: React.FC<PowerGridGameProps> = ({
                 <button
                   key={pair.colorIndex}
                   type="button"
-                  onClick={() => setActiveColor(pair.colorIndex)}
+                  onClick={() => commitActiveColor(pair.colorIndex)}
                   className={`flex items-center justify-between px-2.5 py-2 rounded-md border text-xs transition-colors ${
                     activeColor === pair.colorIndex
                       ? 'border-slate-500 bg-slate-800 text-white'

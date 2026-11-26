@@ -235,8 +235,9 @@ export const BombDefuseGame: React.FC<BombDefuseGameProps> = ({
           className="grid gap-1.5 bg-[#0B0E14] p-2.5 rounded-lg border border-slate-800"
           style={{
             gridTemplateColumns: `repeat(${board.size}, minmax(0, 1fr))`,
-            width: 'min(86vw, 470px)',
-            height: 'min(86vw, 470px)',
+            gridTemplateRows: `repeat(${board.size}, minmax(0, 1fr))`,
+            width: 'min(90vw, 470px)',
+            height: 'min(90vw, 470px)',
           }}
         >
           {board.cells.flatMap((row) =>
@@ -257,15 +258,27 @@ export const BombDefuseGame: React.FC<BombDefuseGameProps> = ({
                   key={`${cell.r}-${cell.c}`}
                   type="button"
                   disabled={!isClickable}
-                  onClick={() => handleCellClick(cell.r, cell.c)}
+                  onPointerDown={(e) => {
+                    if (!isClickable) return;
+                    if (e.button !== 0 && e.pointerType === 'mouse') return;
+                    e.preventDefault();
+                    handleCellClick(cell.r, cell.c);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!isClickable) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleCellClick(cell.r, cell.c);
+                    }
+                  }}
                   aria-label={label}
-                  className={`relative rounded-md border overflow-hidden transition-colors ${
+                  className={`relative rounded-md border overflow-hidden transition-colors touch-manipulation select-none ${
                     cell.kind === 'red' && isPowered
                       ? 'bg-red-950/60 border-red-500'
                       : cell.kind === 'green' && isPowered
                       ? 'bg-emerald-950/50 border-emerald-400'
                       : isClickable
-                      ? 'bg-[#131A28] border-slate-800 hover:border-cyan-500/70 cursor-pointer'
+                      ? 'bg-[#131A28] border-slate-800 active:border-cyan-400 hover:border-cyan-500/70 cursor-pointer'
                       : 'bg-[#0E1420] border-slate-800 cursor-default'
                   }`}
                 >

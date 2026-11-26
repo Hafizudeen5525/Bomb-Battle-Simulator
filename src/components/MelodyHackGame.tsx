@@ -233,7 +233,7 @@ export const MelodyHackGame: React.FC<MelodyHackGameProps> = ({
 
       {/* Sensor Pad Wall */}
       <div
-        className={`grid gap-4 ${
+        className={`grid gap-3 sm:gap-4 ${
           melody.padCount <= 4 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3'
         }`}
       >
@@ -244,9 +244,19 @@ export const MelodyHackGame: React.FC<MelodyHackGameProps> = ({
               key={pad.index}
               type="button"
               disabled={phase !== 'REPLICATE'}
-              onClick={() => handlePadPress(pad.index)}
+              onPointerDown={(e) => {
+                if (e.button !== 0 && e.pointerType === 'mouse') return;
+                e.preventDefault();
+                handlePadPress(pad.index);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  handlePadPress(pad.index);
+                }
+              }}
               aria-label={`${pad.label} (${pad.noteName}) Key ${pad.keyHint}`}
-              className={`group relative h-36 sm:h-44 rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition-transform duration-100 cursor-pointer disabled:cursor-default ${
+              className={`group relative h-28 sm:h-44 rounded-xl border-2 flex flex-col items-center justify-center gap-1.5 sm:gap-2 transition-transform duration-100 touch-manipulation select-none cursor-pointer disabled:cursor-default ${
                 isLit
                   ? 'scale-[1.03] border-white text-slate-950'
                   : 'bg-[#111621] border-slate-800 text-slate-200 hover:border-slate-600'

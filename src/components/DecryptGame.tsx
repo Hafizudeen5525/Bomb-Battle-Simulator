@@ -117,15 +117,15 @@ export const DecryptGame: React.FC<DecryptGameProps> = ({
   };
 
   return (
-    <div className="w-full max-w-6xl mx-auto px-4 py-4 space-y-4">
-      {/* Top Status Bar */}
-      <div className="bg-[#111621] border border-slate-800 rounded-xl px-5 py-3.5 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-6">
+    <div className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-3 sm:py-4 space-y-3 sm:space-y-4">
+      {/* Top Status Bar — sticky on mobile so Next Target stays visible */}
+      <div className="sticky top-2 z-10 bg-[#111621] border border-slate-800 rounded-xl px-4 sm:px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-4 sm:gap-6">
           <div>
             <div className="text-xs text-slate-400">Next Target</div>
             <div
               data-testid="decrypt-target"
-              className="font-mono-tabular text-3xl font-extrabold text-emerald-400 leading-none"
+              className="font-mono-tabular text-2xl sm:text-3xl font-extrabold text-emerald-400 leading-none"
             >
               {nextExpected}
             </div>
@@ -135,7 +135,7 @@ export const DecryptGame: React.FC<DecryptGameProps> = ({
 
           <div>
             <div className="text-xs text-slate-400">Progress</div>
-            <div className="font-mono-tabular text-xl font-bold text-white leading-none">
+            <div className="font-mono-tabular text-lg sm:text-xl font-bold text-white leading-none">
               {nextExpected - 1} / {wave.maxNumber}
             </div>
           </div>
@@ -159,7 +159,7 @@ export const DecryptGame: React.FC<DecryptGameProps> = ({
               type="button"
               onClick={onFinishRoomEarly}
               disabled={waveNum <= 1 && nextExpected <= 25}
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold uppercase tracking-wide rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white transition-colors"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold uppercase tracking-wide rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white transition-colors"
             >
               <span>Advance to Bomb Defuse</span>
               <ArrowRight className="w-4 h-4" aria-hidden="true" />
@@ -169,14 +169,14 @@ export const DecryptGame: React.FC<DecryptGameProps> = ({
       </div>
 
       {/* Multi-Screen 4 Terminal Hub */}
-      <div className="relative grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="relative grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
         {wave.terminals.map((tiles, termIdx) => (
           <section
             key={termIdx}
             aria-label={`Terminal ${termIdx + 1}`}
-            className="bg-[#111621] border border-slate-800 rounded-xl p-3.5"
+            className="bg-[#111621] border border-slate-800 rounded-xl p-3 sm:p-3.5"
           >
-            <div className="flex items-center justify-between mb-2.5 px-1">
+            <div className="flex items-center justify-between mb-2 px-1">
               <span className="font-display text-sm font-bold uppercase tracking-wider text-slate-300">
                 Terminal 0{termIdx + 1}
               </span>
@@ -197,16 +197,26 @@ export const DecryptGame: React.FC<DecryptGameProps> = ({
                     key={tile.value}
                     type="button"
                     disabled={isCleared || Boolean(overridePrompt)}
-                    onClick={() => handleTileClick(tile.value)}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0 && e.pointerType === 'mouse') return;
+                      e.preventDefault();
+                      handleTileClick(tile.value);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleTileClick(tile.value);
+                      }
+                    }}
                     aria-label={
                       isCleared ? `Number ${tile.value} cleared` : `Number ${tile.value}`
                     }
-                    className={`min-h-[42px] rounded-md border font-mono-tabular text-sm font-bold flex items-center justify-center transition-all cursor-pointer disabled:cursor-default ${
+                    className={`min-h-[44px] rounded-md border font-mono-tabular text-sm font-bold flex items-center justify-center transition-opacity touch-manipulation select-none cursor-pointer disabled:cursor-default ${
                       isCleared
                         ? 'bg-[#090C11] border-slate-800/60 text-slate-600'
                         : isWrong
                         ? 'bg-red-600 border-red-400 text-white'
-                        : 'bg-[#171E2E] border-slate-700/80 text-slate-100 hover:bg-slate-700 hover:border-cyan-400'
+                        : 'bg-[#171E2E] border-slate-700/80 text-slate-100 active:bg-cyan-900 hover:bg-slate-700 hover:border-cyan-400'
                     }`}
                     style={
                       isDimmedPhase && !isWrong

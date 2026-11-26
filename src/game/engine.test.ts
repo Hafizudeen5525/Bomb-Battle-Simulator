@@ -6,6 +6,7 @@ import {
 } from './config';
 import {
   generatePowerGridPuzzle,
+  interpolateDragSteps,
   validatePowerGridBoard,
   type PathMap,
 } from './powerGrid';
@@ -194,3 +195,26 @@ test('Score bonus conversion and scoreboard sorting behave deterministically', (
 
   assert.equal(sorted[0].id, 'b');
 });
+
+test('Power Grid drag interpolation handles orthogonal, fast-2, and diagonal corner drags', () => {
+  // Orthogonal 1-step
+  assert.deepEqual(
+    interpolateDragSteps({ r: 0, c: 0 }, { r: 0, c: 1 }, () => true),
+    [{ r: 0, c: 1 }]
+  );
+
+  // Fast 2-step straight swipe
+  assert.deepEqual(
+    interpolateDragSteps({ r: 1, c: 0 }, { r: 1, c: 2 }, () => true),
+    [{ r: 1, c: 1 }, { r: 1, c: 2 }]
+  );
+
+  // Diagonal 1x1 move routes around blocked corner A via corner B
+  const steps = interpolateDragSteps(
+    { r: 0, c: 0 },
+    { r: 1, c: 1 },
+    (c) => !(c.r === 0 && c.c === 1)
+  );
+  assert.deepEqual(steps, [{ r: 1, c: 0 }, { r: 1, c: 1 }]);
+});
+
