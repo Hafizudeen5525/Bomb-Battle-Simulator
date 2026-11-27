@@ -20,9 +20,9 @@ import {
   shouldTriggerOverride,
 } from './decrypt';
 import {
-  generateCircuitBoard,
-  computeCircuitFlow,
-  rotateCircuitCell,
+  evalGate,
+  evaluateLogicCircuit,
+  generateLogicCircuitPuzzle,
 } from './bombDefuse';
 import { sortScoreboard } from './scoreboard';
 
@@ -123,35 +123,51 @@ test('Decrypt generates full 1-100 terminals and valid math overrides', () => {
   assert.equal(shouldTriggerOverride(27, 'normal'), false);
 });
 
-test('Bomb Defuse Circuit Cracker generates solvable scrambled boards that solve when set to solutionRotation', () => {
+test('Bomb Defuse Logic Gates evaluate truth tables and generate guaranteed solvable puzzles', () => {
+  // Verify truth tables for all 6 gate types
+  assert.equal(evalGate('AND', [true, true]), true);
+  assert.equal(evalGate('AND', [true, false]), false);
+  assert.equal(evalGate('OR', [false, true]), true);
+  assert.equal(evalGate('OR', [false, false]), false);
+  assert.equal(evalGate('XOR', [true, false]), true);
+  assert.equal(evalGate('XOR', [true, true]), false);
+  assert.equal(evalGate('NOT', [false]), true);
+  assert.equal(evalGate('NOT', [true]), false);
+  assert.equal(evalGate('NAND', [true, true]), false);
+  assert.equal(evalGate('NAND', [true, false]), true);
+  assert.equal(evalGate('NOR', [false, false]), true);
+  assert.equal(evalGate('NOR', [true, false]), false);
+
   const rng = makeSeededRng(2026);
   for (const diff of ['easy', 'normal', 'hard'] as const) {
     for (let round = 1; round <= 5; round++) {
-      const board = generateCircuitBoard(round, diff, rng);
-      const initialFlow = computeCircuitFlow(board);
-      assert.equal(initialFlow.isSolved, false, `Scrambled round ${round} (${diff}) should not start solved`);
+      const puzzle = generateLogicCircuitPuzzle(round, diff, rng);
+      const initialEval = evaluateLogicCircuit(puzzle, puzzle.initialInputs);
+      assert.equal(
+        initialEval.isSolved,
+        false,
+        `Round ${round} (${diff}) should not start already solved`
+      );
 
-      // Restore solution rotations
-      const solvedBoard = {
-        ...board,
-        cells: board.cells.map((row) =>
-          row.map((cell) =>
-            cell.kind === 'conduit' && cell.solutionRotation !== undefined
-              ? { ...cell, rotation: cell.solutionRotation }
-              : cell
-          )
-        ),
-      };
+      let winningCombinations = 0;
+      const totalStates = 1 << puzzle.numInputs;
+      for (let mask = 0; mask < totalStates; mask++) {
+        const vec = Array.from(
+          { length: puzzle.numInputs },
+          (_, bit) => Boolean((mask >> bit) & 1)
+        );
+        const ev = evaluateLogicCircuit(puzzle, vec);
+        if (ev.isSolved) {
+          assert.equal(ev.allGreensPowered, true);
+          assert.equal(ev.anyRedPowered, false);
+          winningCombinations++;
+        }
+      }
 
-      const solvedFlow = computeCircuitFlow(solvedBoard);
-      assert.equal(solvedFlow.allGreensPowered, true, `Round ${round} (${diff}) solution must power all greens`);
-      assert.equal(solvedFlow.anyRedPowered, false, `Round ${round} (${diff}) solution must avoid red hazards`);
-      assert.equal(solvedFlow.isSolved, true);
-
-      // Verify rotateCircuitCell cycles 0..3
-      const conduit = board.cells.flat().find((c) => c.kind === 'conduit')!;
-      const rotated = rotateCircuitCell(board, conduit.r, conduit.c);
-      assert.equal(rotated.cells[conduit.r][conduit.c].rotation, (conduit.rotation + 1) % 4);
+      assert.ok(
+        winningCombinations >= 1,
+        `Round ${round} (${diff}) must have at least 1 valid pump combination`
+      );
     }
   }
 });

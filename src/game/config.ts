@@ -37,7 +37,7 @@ export const ROOMS: Record<GameId, RoomMeta> = {
     order: 4,
     name: 'Bomb Defuse',
     subtitle: 'Circuit Cracker Core',
-    brief: 'Route energy into GREEN nodes, avoid RED hazards, and pump surges before detonation.',
+    brief: 'Toggle input pumps through logic gates to power GREEN targets and keep RED hazards off.',
     accentHex: '#EF4444',
   },
 };
